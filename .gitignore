@@ -1,0 +1,7 @@
+*.pyc
+*.ipynb_checkpoints/
+/data_and_models
+lib/*
+access_keys/*
+*.json
+*.env
