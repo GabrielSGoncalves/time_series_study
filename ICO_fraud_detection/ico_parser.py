@@ -37,7 +37,7 @@ def _check_if_holder(
     }
     request = requests.get('https://api.etherscan.io/api', params=payload)
     result = request.json().get('result')
-    time.sleep(0.5)
+    time.sleep(1)
     if not result or result == '0x':
         return True
     elif len(result) != '0x':
@@ -48,7 +48,7 @@ def _get_biggest_holder(dict_cumsum_percentage):
     list_sorted_days = sorted(dict_cumsum_percentage.keys())
     dict_percentage_holders = {}
     for day in list_sorted_days:
-        print(day)
+        # print(day)
         dict_current_day = dict_cumsum_percentage.get(day)
         # print(dict_current_day)
         if len(dict_current_day) == 0:
@@ -62,15 +62,15 @@ def _get_biggest_holder(dict_cumsum_percentage):
                 else:
                     max_key = max(dict_current_day, key=dict_current_day.get)
                     if _check_if_holder(max_key):
-                        print(max_key)
+                        # print(max_key)
                         found_holder = True
-                        print(max_key, dict_current_day.get(max_key))
+                        # print(max_key, dict_current_day.get(max_key))
                         dict_percentage_holders[day] = [
                             max_key,
                             dict_current_day.get(max_key),
                         ]
                     else:
-                        print(f'Deleting: {max_key}')
+                        # print(f'Deleting: {max_key}')
                         del dict_current_day[max_key]
     return dict_percentage_holders
 
@@ -97,6 +97,7 @@ class ICOParser:
         date_column='BLOCK_TIMESTAMP',
         value_column='VALUE',
         ico_start_date=None,
+        dateformat='%Y-%m-%d',
         fraud_flag=None,
         len_time_series=60,
     ):
@@ -134,12 +135,11 @@ class ICOParser:
             'D', on=date_column
         ).sum()
         self.ico_start_date = (
-            datetime.strptime(ico_start_date, '%Y-%m-%d')
+            datetime.strptime(ico_start_date, dateformat)
             .replace(tzinfo=pytz.UTC)
             .date()
         )
         self.ico_end_date = None
-
         self.df_newbiers = None
         self.df_newbiers_resample = None
         self.dict_balance = None
@@ -152,9 +152,9 @@ class ICOParser:
         self.array_perc_new_holders = None
         self.array_biggest_holder = None
         self.array_newbiers = None
+        self.array_gas_ratio = None
 
         ## To do:
-        self.gas_ratio_array = None
         self.df_newbiers_resample_day = None
 
     def define_ico_start_date(self):
@@ -295,25 +295,30 @@ class ICOParser:
     def get_biggest_holder_array(self):
         self.array_biggest_holder = [
             value[1] for key, value in self.dict_perc_biggest_holder.items()
-        ]
+        ][-self.len_time_series :]
 
     def get_newbiers_ratio_dict(self):
         df_ratio = self.df_newbiers_resample / self.df_resample_day
         df_ratio.index = df_ratio.index.astype(str)
+        df_ratio.fillna(0, inplace=True)
         self.dict_newbiers_ratio = df_ratio.transactions.to_dict()
 
     def get_newbiers_array(self):
-        self.array_newbiers_ratio = list(self.dict_newbiers_ratio.values())
+        self.array_newbiers_ratio = list(self.dict_newbiers_ratio.values())[
+            -self.len_time_series :
+        ]
 
     def get_gas_ratio_array(self):
-        if self.df_newbiers_resample:
+        if not self.df_newbiers_resample.empty:
             self.df_newbiers_resample['GAS_RATIO'] = (
                 self.df_newbiers_resample['RECEIPT_GAS_USED']
                 / self.df_newbiers_resample['GAS']
             )
-            self.gas_ratio_array = (
+            self.df_newbiers_resample.fillna(0, inplace=True)
+            self.array_gas_ratio = (
                 self.df_newbiers_resample.GAS_RATIO.to_list()
-            )
+            )[-self.len_time_series :]
+
         else:
             print(
                 'self.df_newbiers_resample does not exist.\nPlease run self.get_newbiers_dataframe().'
@@ -344,7 +349,7 @@ class ICOParser:
         self.array_perc_new_holders = [
             value.get('percentage')
             for key, value in self.dict_daily_new_holders.items()
-        ]
+        ][-self.len_time_series :]
 
     def pipeline(self):
         print('Running method: define_ico_start_date ... ')
@@ -369,6 +374,10 @@ class ICOParser:
         self.get_biggest_holder_array()
         print('Running method: get_newbiers_ratio_dict ... ')
         self.get_newbiers_ratio_dict()
+        print('Running method: get_newbiers_array ... ')
+        self.get_newbiers_array()
+        print('Running method: get_gas_ratio_array ... ')
+        self.get_gas_ratio_array()
 
 
 def dataset_creator(list_csv_file,):
