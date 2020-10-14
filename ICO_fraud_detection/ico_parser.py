@@ -203,10 +203,14 @@ class ICOParser:
         df_resample_func['BLOCK_TIMESTAMP'] = df_resample_func[
             'BLOCK_TIMESTAMP'
         ].dt.date
-        self.array_daily_transactions = df_resample_func.loc[
+        df_resample_func_filtered = df_resample_func.loc[
             (df_resample_func[self.date_column] >= self.ico_start_date)
             & (df_resample_func[self.date_column] < self.ico_end_date)
-        ].transactions.values
+        ]
+        list_cumsum = df_resample_func_filtered.transactions.cumsum().to_list()
+        self.array_daily_transactions = [
+            round(val / list_cumsum[-1], 4) for val in list_cumsum
+        ]
 
     def get_balance(self):
         """Process dataframe to extract daily balance for each individual."""
@@ -369,9 +373,37 @@ class ICOParser:
         print('Running method: get_array_perc_new_holders ... ')
         self.get_array_perc_new_holders()
         print('Running method: get_biggest_holder_dict ... ')
-        self.get_biggest_holder_dict()
-        print('Running method: get_biggest_holder_array ... ')
-        self.get_biggest_holder_array()
+        # self.get_biggest_holder_dict()
+        # print('Running method: get_biggest_holder_array ... ')
+        # self.get_biggest_holder_array()
+        print('Running method: get_newbiers_ratio_dict ... ')
+        self.get_newbiers_ratio_dict()
+        print('Running method: get_newbiers_array ... ')
+        self.get_newbiers_array()
+        print('Running method: get_gas_ratio_array ... ')
+        self.get_gas_ratio_array()
+
+    def pipeline_2_arrays(self):
+        print('Running method: define_ico_start_date ... ')
+        self.define_ico_start_date()
+        print('Running method: get_newbiers_dataframe ... ')
+        self.get_newbiers_dataframe()
+        print('Running method: get_balance ... ')
+        self.get_balance()
+        print('Running method: get_cumsum_balance ... ')
+        self.get_cumsum_balance()
+        print('Running method: get_cumsum_daily_percentage ... ')
+        self.get_cumsum_daily_percentage()
+        print('Running method: get_daily_number_of_new_holder ... ')
+        self.get_daily_number_of_new_holder()
+        print('Running method: get_array_daily_transactions ... ')
+        self.get_array_daily_transactions()
+        print('Running method: get_array_perc_new_holders ... ')
+        self.get_array_perc_new_holders()
+        # print('Running method: get_biggest_holder_dict ... ')
+        # self.get_biggest_holder_dict()
+        # print('Running method: get_biggest_holder_array ... ')
+        # self.get_biggest_holder_array()
         print('Running method: get_newbiers_ratio_dict ... ')
         self.get_newbiers_ratio_dict()
         print('Running method: get_newbiers_array ... ')
