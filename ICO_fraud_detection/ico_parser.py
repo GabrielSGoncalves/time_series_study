@@ -87,7 +87,7 @@ def _filter_df_for_training_days(df, date_col, ico_start_date, ico_end_date):
 def _set_dataframe_max_date(df, date_col, max_date):
     df_max_date = df.copy()
     df_max_date[date_col] = pd.to_datetime(df_max_date[date_col]).dt.date
-    return df_max_date[df_max_date[date_col] < max_date]
+    return df_max_date[df_max_date[date_col] <= max_date]
 
 
 class ICOParser:
@@ -160,7 +160,9 @@ class ICOParser:
     def define_ico_start_date(self):
         change_series = self.df_resample_day['transactions'].pct_change()
         if self.ico_start_date:
-            self.ico_end_date = self.ico_start_date + timedelta(days=60)
+            self.ico_end_date = self.ico_start_date + timedelta(
+                days=self.len_time_series
+            )
         else:
             for index, value in change_series.iteritems():
 
@@ -216,6 +218,7 @@ class ICOParser:
         """Process dataframe to extract daily balance for each individual."""
         # Define start date and days of activity
         value_column = self.value_column
+        print(self.ico_start_date, self.ico_end_date)
         dataframe = _set_dataframe_max_date(
             self.df, self.date_column, self.ico_end_date
         )
