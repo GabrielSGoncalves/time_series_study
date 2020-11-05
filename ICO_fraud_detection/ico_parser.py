@@ -2,7 +2,7 @@
 
 import pandas as pd
 from datetime import datetime, timedelta
-from exchange_adresses import ADRESS_LIST
+from exchange_addresses import ADRESS_LIST
 import pytz
 import requests
 import json
@@ -415,5 +415,92 @@ class ICOParser:
         self.get_gas_ratio_array()
 
 
-def dataset_creator(list_csv_file,):
-    pass
+from tensorflow.keras.metrics import Recall
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+import plotly.express as px
+
+
+class ICODeepTraining:
+    def __init__(
+        self, dataframe, target_array, dl_model, ann_type, size_array
+    ):
+
+        self.dataframe = dataframe
+        # self.target_encoded = LabelEncoder().fit_transform(target_array)
+        self.target_encoded = target_array
+        self.X_train = None
+        self.y_train = None
+        self.X_validation = None
+        self.y_validation = None
+        self.dl_model = dl_model
+        self.ann_type = ann_type
+        self.size_array = size_array
+        self.history = None
+
+    def split_train_test(self, test_size=0.3):
+        (
+            self.X_train,
+            self.X_validation,
+            self.y_train,
+            self.y_validation,
+        ) = train_test_split(
+            self.dataframe,
+            self.target_encoded,
+            test_size=test_size,
+            random_state=161,
+        )
+
+        self.X_train = self.X_train.values.astype(float)
+        self.X_validation = self.X_validation.values.astype(float)
+
+        if self.ann_type in ('cnn', 'lstm'):
+            self.X_train = self.X_train.reshape(
+                (len(self.X_train), self.X_train.shape[1], 1)
+            )
+            self.X_validation = self.X_validation.reshape(
+                (len(self.X_validation), self.X_validation.shape[1], 1)
+            )
+
+    def model_summary(self):
+        self.dl_model.summary()
+
+    def train_network(
+        self,
+        loss='binary_crossentropy',
+        optimizer='adam',
+        metrics=['accuracy'],
+        epochs=50,
+        verbose=1,
+        batch_size=32,
+    ):
+        self.dl_model.reset_states()
+        self.dl_model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+        self.history = self.dl_model.fit(
+            self.X_train,
+            self.y_train,
+            epochs=epochs,
+            validation_data=(self.X_validation, self.y_validation),
+            verbose=verbose,
+            batch_size=batch_size,
+        )
+
+    def plot_training(self, figsize=(1200, 800)):
+        df_training_metrics = pd.DataFrame(self.history.history)
+        df_training_plotly = (
+            pd.DataFrame(df_training_metrics.stack())
+            .reset_index()
+            .sort_values(by=['level_1', 'level_0'])
+            .rename(
+                columns={'level_0': 'epochs', 'level_1': 'metric', 0: 'values'}
+            )
+        )
+        fig = px.line(
+            df_training_plotly,
+            x="epochs",
+            y="values",
+            color="metric",
+            line_group="metric",
+            hover_name="metric",
+        )
+        fig.show()
