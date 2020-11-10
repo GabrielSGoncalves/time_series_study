@@ -116,15 +116,32 @@ class ICOParser:
             ico_start_date (datetime.date):
             ico_end_date (datetime.date):
         """
+        # Process start_date and end_date
+        ico_start_date = (
+            datetime.strptime(ico_start_date, dateformat)
+            .replace(tzinfo=pytz.UTC)
+            .date()
+        )
+        ico_end_date = ico_start_date + timedelta(
+                            days=len_time_series
+                        )
+
+        # Slice df for defined start and end date
         df = pd.read_csv(path_to_csv)
         df.sort_values(by=date_column, inplace=True)
         df['transactions'] = 1
-        df_for_resample = df  # .copy()
+
         df[date_column] = pd.to_datetime(df[date_column]).dt.date
+
+        df = df.loc[df[date_column] <= ico_end_date
+            ]
+        df_for_resample = df.copy()
+        #df.set_index(date_column, inplace=True)
+        
         df_for_resample[date_column] = pd.to_datetime(
             df_for_resample[date_column]
         )
-        # df.set_index(date_column, inplace=True)
+        
 
         self.len_time_series = len_time_series
         self.fraud_flag = fraud_flag
@@ -134,12 +151,19 @@ class ICOParser:
         self.df_resample_day = df_for_resample.resample(
             'D', on=date_column
         ).sum()
+        self.ico_start_date = ico_start_date
+        self.ico_end_date = ico_end_date
+        """
         self.ico_start_date = (
             datetime.strptime(ico_start_date, dateformat)
             .replace(tzinfo=pytz.UTC)
             .date()
         )
-        self.ico_end_date = None
+        self.ico_end_date = self.ico_start_date + timedelta(
+                            days=self.len_time_series
+                        )
+        
+        """
         self.df_newbiers = None
         self.df_newbiers_resample = None
         self.dict_balance = None
@@ -195,7 +219,8 @@ class ICOParser:
         list_newbiers = list(df_nonce_01.FROM_ADDRESS_BLOCKCHAIN.unique())
         self.df_newbiers = self.df[
             self.df.FROM_ADDRESS_BLOCKCHAIN.isin(list_newbiers)
-        ]
+        ].reset_index()
+        self.df_newbiers[self.date_column] = pd.to_datetime(self.df_newbiers[self.date_column])
         self.df_newbiers_resample = self.df_newbiers.resample(
             'D', on=self.date_column
         ).sum()
@@ -219,10 +244,13 @@ class ICOParser:
         # Define start date and days of activity
         value_column = self.value_column
         print(self.ico_start_date, self.ico_end_date)
+        '''
         dataframe = _set_dataframe_max_date(
             self.df, self.date_column, self.ico_end_date
         )
-
+        '''
+        dataframe = self.df
+        
         dataframe.set_index(self.date_column, inplace=True)
         dataframe[value_column] = dataframe[value_column].astype(float)
         start_date = dataframe.index.min()
@@ -301,7 +329,7 @@ class ICOParser:
 
     def get_biggest_holder_array(self):
         self.array_biggest_holder = [
-            value[1] for key, value in self.dict_perc_biggest_holder.items()
+            round(value[1],4) for key, value in self.dict_perc_biggest_holder.items()
         ][-self.len_time_series :]
 
     def get_newbiers_ratio_dict(self):
@@ -311,9 +339,9 @@ class ICOParser:
         self.dict_newbiers_ratio = df_ratio.transactions.to_dict()
 
     def get_newbiers_array(self):
-        self.array_newbiers_ratio = list(self.dict_newbiers_ratio.values())[
+        self.array_newbiers = [round(val,4) for val in list(self.dict_newbiers_ratio.values())[
             -self.len_time_series :
-        ]
+        ]]
 
     def get_gas_ratio_array(self):
         if not self.df_newbiers_resample.empty:
@@ -323,7 +351,7 @@ class ICOParser:
             )
             self.df_newbiers_resample.fillna(0, inplace=True)
             self.array_gas_ratio = (
-                self.df_newbiers_resample.GAS_RATIO.to_list()
+                self.df_newbiers_resample.GAS_RATIO.round(4).to_list()
             )[-self.len_time_series :]
 
         else:
@@ -354,13 +382,11 @@ class ICOParser:
 
     def get_array_perc_new_holders(self):
         self.array_perc_new_holders = [
-            value.get('percentage')
+            round(value.get('percentage'),4)
             for key, value in self.dict_daily_new_holders.items()
         ][-self.len_time_series :]
 
     def pipeline(self):
-        print('Running method: define_ico_start_date ... ')
-        self.define_ico_start_date()
         print('Running method: get_newbiers_dataframe ... ')
         self.get_newbiers_dataframe()
         print('Running method: get_balance ... ')
@@ -376,9 +402,9 @@ class ICOParser:
         print('Running method: get_array_perc_new_holders ... ')
         self.get_array_perc_new_holders()
         print('Running method: get_biggest_holder_dict ... ')
-        # self.get_biggest_holder_dict()
-        # print('Running method: get_biggest_holder_array ... ')
-        # self.get_biggest_holder_array()
+        self.get_biggest_holder_dict()
+        print('Running method: get_biggest_holder_array ... ')
+        self.get_biggest_holder_array()
         print('Running method: get_newbiers_ratio_dict ... ')
         self.get_newbiers_ratio_dict()
         print('Running method: get_newbiers_array ... ')
