@@ -7,6 +7,7 @@ import pytz
 import requests
 import json
 import time
+import statsmodels.api as sm
 
 
 def _sum_dict_values(d1, d2, lambda_sum=lambda x, y: x + y):
@@ -37,16 +38,18 @@ def _check_if_holder(
     }
     request = requests.get('https://api.etherscan.io/api', params=payload)
     result = request.json().get('result')
-    time.sleep(1)
+    time.sleep(0.5)
     if not result or result == '0x':
         return True
-    elif len(result) != '0x':
+    elif result != '0x':
         return False
 
 
 def _get_biggest_holder(dict_cumsum_percentage):
     list_sorted_days = sorted(dict_cumsum_percentage.keys())
     dict_percentage_holders = {}
+    dict_holder_status = {}
+    counter_api_calls = 0
     for day in list_sorted_days:
         # print(day)
         dict_current_day = dict_cumsum_percentage.get(day)
@@ -61,17 +64,32 @@ def _get_biggest_holder(dict_cumsum_percentage):
                     break
                 else:
                     max_key = max(dict_current_day, key=dict_current_day.get)
-                    if _check_if_holder(max_key):
-                        # print(max_key)
+                    status_for_key = dict_holder_status.get(max_key)
+                    if status_for_key:
                         found_holder = True
-                        # print(max_key, dict_current_day.get(max_key))
                         dict_percentage_holders[day] = [
                             max_key,
                             dict_current_day.get(max_key),
                         ]
-                    else:
-                        # print(f'Deleting: {max_key}')
+
+                    elif status_for_key == False:
                         del dict_current_day[max_key]
+                    elif status_for_key == None:
+                        counter_api_calls += 1
+                        dict_holder_status[max_key] = _check_if_holder(max_key)
+
+                        if dict_holder_status.get(max_key):
+                            # print(max_key)
+                            found_holder = True
+                            # print(max_key, dict_current_day.get(max_key))
+                            dict_percentage_holders[day] = [
+                                max_key,
+                                dict_current_day.get(max_key),
+                            ]
+                        else:
+                            del dict_current_day[max_key]
+    print('Number of API calls', counter_api_calls)
+    print(f'List adresses checked: {dict_holder_status.keys()}')
     return dict_percentage_holders
 
 
@@ -100,6 +118,7 @@ class ICOParser:
         dateformat='%Y-%m-%d',
         fraud_flag=None,
         len_time_series=60,
+        rolling_window_days=3,
     ):
         """Class for parsing data coming from ICO.
 
@@ -122,9 +141,7 @@ class ICOParser:
             .replace(tzinfo=pytz.UTC)
             .date()
         )
-        ico_end_date = ico_start_date + timedelta(
-                            days=len_time_series
-                        )
+        ico_end_date = ico_start_date + timedelta(days=len_time_series)
 
         # Slice df for defined start and end date
         df = pd.read_csv(path_to_csv)
@@ -133,15 +150,13 @@ class ICOParser:
 
         df[date_column] = pd.to_datetime(df[date_column]).dt.date
 
-        df = df.loc[df[date_column] <= ico_end_date
-            ]
+        df = df.loc[df[date_column] <= ico_end_date]
         df_for_resample = df.copy()
-        #df.set_index(date_column, inplace=True)
-        
+        # df.set_index(date_column, inplace=True)
+
         df_for_resample[date_column] = pd.to_datetime(
             df_for_resample[date_column]
         )
-        
 
         self.len_time_series = len_time_series
         self.fraud_flag = fraud_flag
@@ -153,17 +168,8 @@ class ICOParser:
         ).sum()
         self.ico_start_date = ico_start_date
         self.ico_end_date = ico_end_date
-        """
-        self.ico_start_date = (
-            datetime.strptime(ico_start_date, dateformat)
-            .replace(tzinfo=pytz.UTC)
-            .date()
-        )
-        self.ico_end_date = self.ico_start_date + timedelta(
-                            days=self.len_time_series
-                        )
-        
-        """
+        self.rolling_window_days = rolling_window_days
+
         self.df_newbiers = None
         self.df_newbiers_resample = None
         self.dict_balance = None
@@ -177,6 +183,12 @@ class ICOParser:
         self.array_biggest_holder = None
         self.array_newbiers = None
         self.array_gas_ratio = None
+        self.array_daily_transactions_ma = None
+        self.array_perc_new_holders_ma = None
+        self.array_biggest_holder_ma = None
+        self.array_newbiers_ma = None
+        self.array_gas_ratio_ma = None
+        self.array_autocorrelation_transactions = None
 
         ## To do:
         self.df_newbiers_resample_day = None
@@ -205,6 +217,18 @@ class ICOParser:
                     print(self.ico_start_date)
                     break
 
+    def get_array_autocorrelation_transactions(self, nlags=60):
+        df_resample_func = self.df_resample_day.reset_index()
+        df_resample_func['BLOCK_TIMESTAMP'] = df_resample_func[
+            'BLOCK_TIMESTAMP'
+        ].dt.date
+        array_transactions_from_start = df_resample_func.loc[
+            df_resample_func[self.date_column] >= self.ico_start_date
+        ]
+        self.array_autocorrelation_transactions = sm.tsa.acf(
+            array_transactions_from_start.transactions, nlags=nlags
+        )
+
     def filter_df_for_training_days(self, df):
         if self.ico_start_date:
             return self.df_resample_day.loc[
@@ -220,7 +244,9 @@ class ICOParser:
         self.df_newbiers = self.df[
             self.df.FROM_ADDRESS_BLOCKCHAIN.isin(list_newbiers)
         ].reset_index()
-        self.df_newbiers[self.date_column] = pd.to_datetime(self.df_newbiers[self.date_column])
+        self.df_newbiers[self.date_column] = pd.to_datetime(
+            self.df_newbiers[self.date_column]
+        )
         self.df_newbiers_resample = self.df_newbiers.resample(
             'D', on=self.date_column
         ).sum()
@@ -231,26 +257,30 @@ class ICOParser:
             'BLOCK_TIMESTAMP'
         ].dt.date
         df_resample_func_filtered = df_resample_func.loc[
-            (df_resample_func[self.date_column] >= self.ico_start_date)
-            & (df_resample_func[self.date_column] < self.ico_end_date)
+            df_resample_func[self.date_column] <= self.ico_end_date
         ]
         list_cumsum = df_resample_func_filtered.transactions.cumsum().to_list()
+        list_cumsum_ma = (
+            df_resample_func_filtered.transactions.cumsum()
+            .rolling(window=self.rolling_window_days)
+            .mean()
+            .round(4)
+            .to_list()
+        )
         self.array_daily_transactions = [
             round(val / list_cumsum[-1], 4) for val in list_cumsum
-        ]
+        ][-self.len_time_series :]
+        self.array_daily_transactions_ma = [
+            round(val / list_cumsum[-1], 4) for val in list_cumsum_ma
+        ][-self.len_time_series :]
 
     def get_balance(self):
         """Process dataframe to extract daily balance for each individual."""
         # Define start date and days of activity
         value_column = self.value_column
         print(self.ico_start_date, self.ico_end_date)
-        '''
-        dataframe = _set_dataframe_max_date(
-            self.df, self.date_column, self.ico_end_date
-        )
-        '''
         dataframe = self.df
-        
+
         dataframe.set_index(self.date_column, inplace=True)
         dataframe[value_column] = dataframe[value_column].astype(float)
         start_date = dataframe.index.min()
@@ -258,7 +288,7 @@ class ICOParser:
         days_activity = (dataframe.index.max() - start_date).days
         print(days_activity)
         dict_balance = {}
-        for delta in range(days_activity):
+        for delta in range(days_activity + 1):
             current_date = dataframe.index.min() + timedelta(delta)
             df_current_date = dataframe.loc[dataframe.index == current_date]
             dict_user_balance = {}
@@ -328,9 +358,23 @@ class ICOParser:
         )
 
     def get_biggest_holder_array(self):
-        self.array_biggest_holder = [
-            round(value[1],4) for key, value in self.dict_perc_biggest_holder.items()
-        ][-self.len_time_series :]
+        series_biggest_holder_array = pd.Series(
+            [
+                round(value[1], 4)
+                for key, value in self.dict_perc_biggest_holder.items()
+            ]
+        )
+        self.array_biggest_holder = series_biggest_holder_array.round(
+            4
+        ).tolist()[-self.len_time_series :]
+        self.array_biggest_holder_ma = (
+            series_biggest_holder_array.rolling(
+                window=self.rolling_window_days
+            )
+            .mean()
+            .round(4)
+            .tolist()[-self.len_time_series :]
+        )
 
     def get_newbiers_ratio_dict(self):
         df_ratio = self.df_newbiers_resample / self.df_resample_day
@@ -339,9 +383,18 @@ class ICOParser:
         self.dict_newbiers_ratio = df_ratio.transactions.to_dict()
 
     def get_newbiers_array(self):
-        self.array_newbiers = [round(val,4) for val in list(self.dict_newbiers_ratio.values())[
+        series_newbiers = pd.Series(
+            [round(val, 4) for val in list(self.dict_newbiers_ratio.values())]
+        )
+        self.array_newbiers = series_newbiers.round(4).tolist()[
             -self.len_time_series :
-        ]]
+        ]
+        self.array_newbiers_ma = (
+            series_newbiers.rolling(window=self.rolling_window_days)
+            .mean()
+            .round(4)
+            .tolist()[-self.len_time_series :]
+        )
 
     def get_gas_ratio_array(self):
         if not self.df_newbiers_resample.empty:
@@ -350,10 +403,16 @@ class ICOParser:
                 / self.df_newbiers_resample['GAS']
             )
             self.df_newbiers_resample.fillna(0, inplace=True)
-            self.array_gas_ratio = (
-                self.df_newbiers_resample.GAS_RATIO.round(4).to_list()
-            )[-self.len_time_series :]
-
+            series_gas_ratio = self.df_newbiers_resample.GAS_RATIO
+            self.array_gas_ratio = series_gas_ratio.round(4).tolist()[
+                -self.len_time_series :
+            ]
+            self.array_gas_ratio_ma = (
+                series_gas_ratio.rolling(window=self.rolling_window_days)
+                .mean()
+                .round(4)
+                .tolist()[-self.len_time_series :]
+            )
         else:
             print(
                 'self.df_newbiers_resample does not exist.\nPlease run self.get_newbiers_dataframe().'
@@ -381,10 +440,21 @@ class ICOParser:
         self.dict_daily_new_holders = dict_result
 
     def get_array_perc_new_holders(self):
-        self.array_perc_new_holders = [
-            round(value.get('percentage'),4)
-            for key, value in self.dict_daily_new_holders.items()
-        ][-self.len_time_series :]
+        series_perc_new_holders = pd.Series(
+            [
+                round(value.get('percentage'), 4)
+                for key, value in self.dict_daily_new_holders.items()
+            ]
+        )
+        self.array_perc_new_holders = series_perc_new_holders.round(
+            4
+        ).tolist()[-self.len_time_series :]
+        self.array_perc_new_holders_ma = (
+            series_perc_new_holders.rolling(window=self.rolling_window_days)
+            .mean()
+            .round(4)
+            .tolist()[-self.len_time_series :]
+        )
 
     def pipeline(self):
         print('Running method: get_newbiers_dataframe ... ')
@@ -441,6 +511,7 @@ class ICOParser:
         self.get_gas_ratio_array()
 
 
+from tensorflow import keras
 from tensorflow.keras.metrics import Recall
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
@@ -496,6 +567,7 @@ class ICODeepTraining:
         loss='binary_crossentropy',
         optimizer='adam',
         metrics=['accuracy'],
+        callback=keras.callbacks.EarlyStopping(monitor='loss', patience=5),
         epochs=50,
         verbose=1,
         batch_size=32,
@@ -509,6 +581,7 @@ class ICODeepTraining:
             validation_data=(self.X_validation, self.y_validation),
             verbose=verbose,
             batch_size=batch_size,
+            callbacks=[callback],
         )
 
     def plot_training(self, figsize=(1200, 800)):
