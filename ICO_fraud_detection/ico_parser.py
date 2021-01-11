@@ -7,6 +7,7 @@ import pytz
 import requests
 import json
 import time
+import statsmodels.api as sm
 
 
 def _sum_dict_values(d1, d2, lambda_sum=lambda x, y: x + y):
@@ -187,6 +188,7 @@ class ICOParser:
         self.array_biggest_holder_ma = None
         self.array_newbiers_ma = None
         self.array_gas_ratio_ma = None
+        self.array_autocorrelation_transactions = None
 
         ## To do:
         self.df_newbiers_resample_day = None
@@ -214,6 +216,18 @@ class ICOParser:
                         )
                     print(self.ico_start_date)
                     break
+
+    def get_array_autocorrelation_transactions(self, nlags=60):
+        df_resample_func = self.df_resample_day.reset_index()
+        df_resample_func['BLOCK_TIMESTAMP'] = df_resample_func[
+            'BLOCK_TIMESTAMP'
+        ].dt.date
+        array_transactions_from_start = df_resample_func.loc[
+            df_resample_func[self.date_column] >= self.ico_start_date
+        ]
+        self.array_autocorrelation_transactions = sm.tsa.acf(
+            array_transactions_from_start.transactions, nlags=nlags
+        )
 
     def filter_df_for_training_days(self, df):
         if self.ico_start_date:
